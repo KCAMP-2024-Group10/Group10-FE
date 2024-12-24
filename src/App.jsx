@@ -34,7 +34,7 @@ function AppInner() {
       <Routes>
         <Route path="/" element={<Splash />} />
         <Route path="/main" element={<Main />} />
-        <Route path="/about" element={<About />} />
+        <Route path="/report" element={<About />} />
         <Route path="/info" element={<MyInfo />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

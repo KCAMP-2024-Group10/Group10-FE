@@ -8,7 +8,7 @@ function Header() {
           <Link to="/main" className="hover:text-yellow-300">Main</Link>
         </li>
         <li>
-          <Link to="/about" className="hover:text-yellow-300">About</Link>
+          <Link to="/report" className="hover:text-yellow-300">Report</Link>
         </li>
         <li>
           <Link to="/info" className="hover:text-yellow-300">Info</Link>
