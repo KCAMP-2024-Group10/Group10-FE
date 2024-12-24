@@ -4,8 +4,8 @@ import Modal from "react-modal";
 import { FaSearch } from "react-icons/fa";
 import { sendStartPoint } from "../api/mapApi"; // API 임포트
 
-// Tailwind import
-import '../index.css'
+// Tailwind import (여기서 Tailwind를 전역적으로 불러온다고 가정)
+import "../index.css";
 
 // 지도 스타일 설정
 const containerStyle = {
@@ -13,13 +13,13 @@ const containerStyle = {
   height: "60vh",
 };
 
-// 초기 중심 위치
+// 초기 중심 위치 (치앙마이 예시)
 const initialPosition = {
   lat: 18.810664742665605,
   lng: 98.97923073813442,
 };
 
-// 렌더링 상태 처리
+// Wrapper의 render 함수
 const render = (status) => {
   if (status === Status.LOADING) return <p>지도를 불러오는 중...</p>;
   if (status === Status.FAILURE) return <p>지도를 불러오지 못했습니다.</p>;
@@ -76,21 +76,24 @@ Modal.setAppElement("#root");
 
 // 메인 컴포넌트
 function Main() {
+  // 모달 상태
   const [isModalOpen, setIsModalOpen] = useState(false); // 목적지 검색 모달
   const [resultModalOpen, setResultModalOpen] = useState(false); // 결과 표시 모달
+
+  // 지도, 마커, 경로
   const [currentLocation, setCurrentLocation] = useState(initialPosition);
   const [loading, setLoading] = useState(true);
   const [markers, setMarkers] = useState([]);
   const [directions, setDirections] = useState(null);
+
+  // 검색 입력값
   const [searchValue, setSearchValue] = useState("");
 
-  // 결과값 상태
+  // 결과값(크레딧, 거리)
   const [credits, setCredits] = useState(0);
   const [distance, setDistance] = useState(0);
 
-  const autocompleteRef = useRef(null);
-
-  // 현재 위치 가져오기
+  // 지도 로드 & 현재 위치 설정
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -108,9 +111,6 @@ function Main() {
               description: "사용자의 현재 위치입니다.",
             },
           ]);
-          console.log(
-            `현재 위치 lat: ${userLocation.lat}, lng: ${userLocation.lng}`
-          );
           setLoading(false);
         },
         (error) => {
@@ -124,7 +124,7 @@ function Main() {
     }
   }, []);
 
-  // 지도 클릭 핸들러
+  // 지도 클릭 시 마커 & 경로 계산 & API 전송
   const handleMapClick = async (location) => {
     setMarkers((prev) => [
       ...prev,
@@ -145,8 +145,8 @@ function Main() {
       startX: currentLocation.lat, // 현재 위치 Y
       endY: location.lng, // 클릭한 위치 X
       endX: location.lat, // 클릭한 위치 Y
-      currentY: currentLocation.lng, // 현재 X
-      currentX: currentLocation.lat, // 현재 Y
+      currentY: currentLocation.lng,
+      currentX: currentLocation.lat,
     };
 
     try {
@@ -154,7 +154,6 @@ function Main() {
       const response = await sendStartPoint(startPoint);
       console.log("시작점 정보 전송 성공:", response.credit, response.distance);
 
-      // 결과값 상태 저장
       setCredits(response.credit);
       setDistance(response.distance);
 
@@ -184,10 +183,78 @@ function Main() {
     );
   };
 
-  // 모달 열기 및 닫기
+  /* =========================
+      1) 모달 열기/닫기
+  ========================== */
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
   const closeResultModal = () => setResultModalOpen(false);
+
+  /* =========================
+      2) 검색 실행 함수
+  ========================== */
+  const handleSearch = async () => {
+    if (!searchValue.trim()) {
+      alert("검색어를 입력해주세요.");
+      return;
+    }
+
+    // 구글 지도 Geocoding 사용
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ address: searchValue }, async (results, status) => {
+      if (status === "OK" && results[0]) {
+        const location = results[0].geometry.location;
+        const lat = location.lat();
+        const lng = location.lng();
+
+        // 지도에 마커 추가
+        setMarkers((prev) => [
+          ...prev,
+          {
+            position: { lat, lng },
+            label: String.fromCharCode(65 + prev.length),
+            title: "검색된 위치",
+            description: searchValue,
+          },
+        ]);
+
+        // 경로 계산
+        calculateRoute({ lat, lng });
+
+        // API 요청
+        const startPoint = {
+          startY: currentLocation.lng,
+          startX: currentLocation.lat,
+          endY: lng,
+          endX: lat,
+          currentY: currentLocation.lng,
+          currentX: currentLocation.lat,
+        };
+
+        try {
+          const response = await sendStartPoint(startPoint);
+          console.log(
+            "시작점 정보 전송 성공(검색):",
+            response.credit,
+            response.distance
+          );
+
+          setCredits(response.credit);
+          setDistance(response.distance);
+
+          // 결과 모달 띄우기
+          setResultModalOpen(true);
+        } catch (error) {
+          console.error("검색 위치 전송 실패:", error);
+        }
+
+        // 모달 닫기
+        closeModal();
+      } else {
+        alert("장소를 찾을 수 없습니다.");
+      }
+    });
+  };
 
   return (
     <Wrapper
@@ -201,18 +268,16 @@ function Main() {
             <p>현재 위치를 불러오는 중...</p>
           </div>
         ) : (
-          <>
-            <Map
-              center={currentLocation}
-              zoom={15}
-              markers={markers}
-              directions={directions}
-              onMapClick={handleMapClick}
-            />
-          </>
+          <Map
+            center={currentLocation}
+            zoom={15}
+            markers={markers}
+            directions={directions}
+            onMapClick={handleMapClick}
+          />
         )}
 
-        {/* 검색 버튼 */}
+        {/* 검색 버튼 (모달 열기) */}
         <button
           onClick={openModal}
           className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2"
@@ -221,21 +286,63 @@ function Main() {
           목적지 검색
         </button>
 
-        {/* 결과 모달 */}
+        {/* 검색 모달 */}
+        <Modal
+          isOpen={isModalOpen}
+          onRequestClose={closeModal}
+          style={{
+            overlay: {
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+            },
+            content: {
+              width: "300px",
+              height: "200px",
+              margin: "auto",
+              padding: "20px",
+              borderRadius: "10px",
+              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            },
+          }}
+        >
+          <h2 className="text-xl font-semibold mb-4">목적지 검색</h2>
+          <input
+            type="text"
+            placeholder="검색할 장소를 입력하세요"
+            className="w-full p-2 border rounded mb-4"
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={closeModal}
+              className="bg-gray-300 text-black px-4 py-2 rounded"
+            >
+              취소
+            </button>
+            <button
+              onClick={handleSearch}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+              검색
+            </button>
+          </div>
+        </Modal>
+
+        {/* 결과 모달 (경로 정보) */}
         <Modal
           isOpen={resultModalOpen}
           onRequestClose={closeResultModal}
           style={{
             overlay: {
-              backgroundColor: "rgba(0, 0, 0, 0.5)", // 배경 투명도 조절
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
             },
             content: {
-              width: "300px", // 모달 너비 조절
-              height: "200px", // 모달 높이 조절
-              margin: "auto", // 화면 중앙 배치
-              padding: "20px", // 내부 여백
-              borderRadius: "10px", // 모서리 둥글게
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)", // 그림자 효과 추가
+              width: "300px",
+              height: "200px",
+              margin: "auto",
+              padding: "20px",
+              borderRadius: "10px",
+              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
             },
           }}
         >
