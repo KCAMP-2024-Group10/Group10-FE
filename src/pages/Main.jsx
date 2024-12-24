@@ -36,14 +36,14 @@ const Map = ({ center, zoom, markers, onMapClick, directions }) => {
       zoom,
     });
 
-    // 지도 클릭 이벤트 추가
+    // 지도 클릭 이벤트
     map.addListener("click", (event) => {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
       onMapClick({ lat, lng });
     });
 
-    // 마커 추가
+    // 마커 생성
     markers.forEach((marker) => {
       const markerObj = new window.google.maps.Marker({
         position: marker.position,
@@ -66,7 +66,7 @@ const Map = ({ center, zoom, markers, onMapClick, directions }) => {
       directionsRenderer.setMap(map);
       directionsRenderer.setDirections(directions);
     }
-  }, [center, zoom, markers, directions, onMapClick]);
+  }, [center, zoom, markers, onMapClick, directions]);
 
   return <div ref={ref} style={containerStyle} />;
 };
@@ -76,15 +76,19 @@ Modal.setAppElement("#root");
 
 // 메인 컴포넌트
 function Main() {
-  // 모달 상태
+  // 모달 관련 상태
   const [isModalOpen, setIsModalOpen] = useState(false); // 목적지 검색 모달
   const [resultModalOpen, setResultModalOpen] = useState(false); // 결과 표시 모달
 
-  // 지도, 마커, 경로
+  // 지도 상태
   const [currentLocation, setCurrentLocation] = useState(initialPosition);
   const [loading, setLoading] = useState(true);
   const [markers, setMarkers] = useState([]);
   const [directions, setDirections] = useState(null);
+
+  // 자동완성 input과 객체 Ref
+  const autocompleteInputRef = useRef(null);
+  const autocompleteObjRef = useRef(null);
 
   // 검색 입력값
   const [searchValue, setSearchValue] = useState("");
@@ -93,7 +97,7 @@ function Main() {
   const [credits, setCredits] = useState(0);
   const [distance, setDistance] = useState(0);
 
-  // 지도 로드 & 현재 위치 설정
+  // 현재 위치 가져오기
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -124,7 +128,7 @@ function Main() {
     }
   }, []);
 
-  // 지도 클릭 시 마커 & 경로 계산 & API 전송
+  // 지도 클릭 시 마커 & 경로 표시 & API 전송
   const handleMapClick = async (location) => {
     setMarkers((prev) => [
       ...prev,
@@ -136,28 +140,26 @@ function Main() {
       },
     ]);
 
-    console.log(`클릭 위치 lat: ${location.lat}, lng: ${location.lng}`);
     calculateRoute(location);
 
-    // API 요청 데이터 구성
+    // API 요청
     const startPoint = {
-      startY: currentLocation.lng, // 현재 위치 X
-      startX: currentLocation.lat, // 현재 위치 Y
-      endY: location.lng, // 클릭한 위치 X
-      endX: location.lat, // 클릭한 위치 Y
+      startY: currentLocation.lng,
+      startX: currentLocation.lat,
+      endY: location.lng,
+      endX: location.lat,
       currentY: currentLocation.lng,
       currentX: currentLocation.lat,
     };
 
     try {
-      // API 요청
       const response = await sendStartPoint(startPoint);
       console.log("시작점 정보 전송 성공:", response.credit, response.distance);
 
       setCredits(response.credit);
       setDistance(response.distance);
 
-      // 결과 모달 열기
+      // 결과 모달
       setResultModalOpen(true);
     } catch (error) {
       console.error("시작점 정보 전송 실패:", error);
@@ -183,78 +185,99 @@ function Main() {
     );
   };
 
-  /* =========================
-      1) 모달 열기/닫기
-  ========================== */
-  const openModal = () => setIsModalOpen(true);
-  const closeModal = () => setIsModalOpen(false);
-  const closeResultModal = () => setResultModalOpen(false);
+  /* ===============================
+      Autocomplete 초기화 & 이벤트
+  ================================ */
+  useEffect(() => {
+    if (isModalOpen && window.google) {
+      // Autocomplete 객체 생성
+      const autocomplete = new window.google.maps.places.Autocomplete(
+        autocompleteInputRef.current,
+        {
+          // 옵션: types 등 지정 가능
+        }
+      );
+      autocompleteObjRef.current = autocomplete;
 
-  /* =========================
-      2) 검색 실행 함수
-  ========================== */
-  const handleSearch = async () => {
-    if (!searchValue.trim()) {
-      alert("검색어를 입력해주세요.");
+      // place_changed 이벤트
+      autocomplete.addListener("place_changed", handlePlaceChanged);
+    }
+
+    // 모달 닫힐 때마다 리스너 정리
+    return () => {
+      if (autocompleteObjRef.current) {
+        window.google.maps.event.clearInstanceListeners(
+          autocompleteObjRef.current
+        );
+      }
+    };
+  }, [isModalOpen]);
+
+  // 장소 선택 시
+  const handlePlaceChanged = async () => {
+    const place = autocompleteObjRef.current?.getPlace();
+    if (!place || !place.geometry) {
+      console.log("장소를 찾을 수 없습니다.");
       return;
     }
 
-    // 구글 지도 Geocoding 사용
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ address: searchValue }, async (results, status) => {
-      if (status === "OK" && results[0]) {
-        const location = results[0].geometry.location;
-        const lat = location.lat();
-        const lng = location.lng();
+    const lat = place.geometry.location.lat();
+    const lng = place.geometry.location.lng();
 
-        // 지도에 마커 추가
-        setMarkers((prev) => [
-          ...prev,
-          {
-            position: { lat, lng },
-            label: String.fromCharCode(65 + prev.length),
-            title: "검색된 위치",
-            description: searchValue,
-          },
-        ]);
+    // 마커 추가
+    setMarkers((prev) => [
+      ...prev,
+      {
+        position: { lat, lng },
+        label: String.fromCharCode(65 + prev.length),
+        title: "검색된 위치",
+        description: place.formatted_address || searchValue,
+      },
+    ]);
 
-        // 경로 계산
-        calculateRoute({ lat, lng });
+    // 경로 계산
+    calculateRoute({ lat, lng });
 
-        // API 요청
-        const startPoint = {
-          startY: currentLocation.lng,
-          startX: currentLocation.lat,
-          endY: lng,
-          endX: lat,
-          currentY: currentLocation.lng,
-          currentX: currentLocation.lat,
-        };
+    // API 전송
+    const startPoint = {
+      startY: currentLocation.lng,
+      startX: currentLocation.lat,
+      endY: lng,
+      endX: lat,
+      currentY: currentLocation.lng,
+      currentX: currentLocation.lat,
+    };
 
-        try {
-          const response = await sendStartPoint(startPoint);
-          console.log(
-            "시작점 정보 전송 성공(검색):",
-            response.credit,
-            response.distance
-          );
+    try {
+      const response = await sendStartPoint(startPoint);
+      console.log(
+        "시작점 정보 전송 성공(자동완성):",
+        response.credit,
+        response.distance
+      );
 
-          setCredits(response.credit);
-          setDistance(response.distance);
+      setCredits(response.credit);
+      setDistance(response.distance);
 
-          // 결과 모달 띄우기
-          setResultModalOpen(true);
-        } catch (error) {
-          console.error("검색 위치 전송 실패:", error);
-        }
+      // 결과 모달
+      setResultModalOpen(true);
+    } catch (error) {
+      console.error("검색 위치 전송 실패:", error);
+    }
 
-        // 모달 닫기
-        closeModal();
-      } else {
-        alert("장소를 찾을 수 없습니다.");
-      }
-    });
+    // 모달 닫기
+    closeModal();
   };
+
+  /* =========================
+      모달 열기/닫기
+  ========================== */
+  const openModal = () => {
+    setIsModalOpen(true);
+    setSearchValue("");
+  };
+  const closeModal = () => setIsModalOpen(false);
+  const closeResultModal = () => setResultModalOpen(false);
 
   return (
     <Wrapper
@@ -280,13 +303,15 @@ function Main() {
         {/* 검색 버튼 (모달 열기) */}
         <button
           onClick={openModal}
-          className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2"
+          className="absolute bottom-20 left-1/2 transform -translate-x-1/2 
+                     bg-blue-500 text-white px-6 py-3 rounded-full 
+                     shadow-lg flex items-center gap-2"
         >
           <FaSearch />
           목적지 검색
         </button>
 
-        {/* 검색 모달 */}
+        {/* 검색 모달 (Autocomplete) */}
         <Modal
           isOpen={isModalOpen}
           onRequestClose={closeModal}
@@ -306,6 +331,7 @@ function Main() {
         >
           <h2 className="text-xl font-semibold mb-4">목적지 검색</h2>
           <input
+            ref={autocompleteInputRef}
             type="text"
             placeholder="검색할 장소를 입력하세요"
             className="w-full p-2 border rounded mb-4"
@@ -319,12 +345,11 @@ function Main() {
             >
               취소
             </button>
-            <button
-              onClick={handleSearch}
-              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-            >
-              검색
-            </button>
+            {/* 
+              이 버튼은 '직접 검색(Geocoding)'을 추가로 지원하려면 사용 가능.
+              현재는 자동완성 선택 시 바로 place_changed 이벤트가 발생하므로
+              별도로 [검색] 버튼이 필요 없다면 비워두거나 숨길 수 있습니다.
+            */}
           </div>
         </Modal>
 
