@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-route
 import { LoadScript } from '@react-google-maps/api';
 import Main from './pages/Main'; 
 import About from './pages/About';
-import Contact from './pages/Contact';
+import MyInfo from './pages/MyInfo';
 import NotFound from './pages/NotFound';
 import Header from './components/Header';
 import Splash from './pages/Splash';
@@ -35,7 +35,7 @@ function AppInner() {
         <Route path="/" element={<Splash />} />
         <Route path="/main" element={<Main />} />
         <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
+        <Route path="/info" element={<MyInfo />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>

@@ -3,8 +3,9 @@ import { Wrapper, Status } from "@googlemaps/react-wrapper";
 import Modal from "react-modal";
 import { FaSearch } from "react-icons/fa";
 import { sendStartPoint } from "../api/mapApi"; // API 임포트
+import { sendWalking } from "../api/movingApi";     // 도보 중 위치 전송 (PATCH)
 
-// Tailwind import (여기서 Tailwind를 전역적으로 불러온다고 가정)
+// Tailwind import
 import "../index.css";
 
 // 지도 스타일 설정
@@ -13,7 +14,7 @@ const containerStyle = {
   height: "60vh",
 };
 
-// 초기 중심 위치 (치앙마이 예시)
+// 초기 중심 위치
 const initialPosition = {
   lat: 18.810664742665605,
   lng: 98.97923073813442,
@@ -31,10 +32,7 @@ const Map = ({ center, zoom, markers, onMapClick, directions }) => {
   const ref = useRef(null);
 
   useEffect(() => {
-    const map = new window.google.maps.Map(ref.current, {
-      center,
-      zoom,
-    });
+    const map = new window.google.maps.Map(ref.current, { center, zoom });
 
     // 지도 클릭 이벤트
     map.addListener("click", (event) => {
@@ -76,28 +74,36 @@ Modal.setAppElement("#root");
 
 // 메인 컴포넌트
 function Main() {
-  // 모달 관련 상태
+  // --- [1] 상태 변수들 ---
   const [isModalOpen, setIsModalOpen] = useState(false); // 목적지 검색 모달
   const [resultModalOpen, setResultModalOpen] = useState(false); // 결과 표시 모달
 
-  // 지도 상태
   const [currentLocation, setCurrentLocation] = useState(initialPosition);
   const [loading, setLoading] = useState(true);
   const [markers, setMarkers] = useState([]);
   const [directions, setDirections] = useState(null);
 
-  // 자동완성 input과 객체 Ref
+  // 자동완성용 ref
   const autocompleteInputRef = useRef(null);
   const autocompleteObjRef = useRef(null);
 
-  // 검색 입력값
+  // 검색, 결과값
   const [searchValue, setSearchValue] = useState("");
-
-  // 결과값(크레딧, 거리)
   const [credits, setCredits] = useState(0);
   const [distance, setDistance] = useState(0);
 
-  // 현재 위치 가져오기
+  // 마지막 목적지를 기록해, "이동하기" 시 재계산에 사용
+  const [lastDestination, setLastDestination] = useState(null);
+
+  // 이동 모드: 기본 WALKING, “이동하기” 클릭 → DRIVING
+  const [travelMode, setTravelMode] = useState(
+    window.google.maps.TravelMode.WALKING
+  );
+
+  // 10초 간격으로 위치 전송할 Interval ID
+  const intervalRef = useRef(null);
+
+  // --- [2] 현재 위치 가져오기 ---
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -109,6 +115,7 @@ function Main() {
           setCurrentLocation(userLocation);
           setMarkers([
             {
+              // label이 'A'인 마커 = 현재 위치 (지우지 않도록 구분자)
               position: userLocation,
               label: "A",
               title: "현재 위치",
@@ -128,21 +135,26 @@ function Main() {
     }
   }, []);
 
-  // 지도 클릭 시 마커 & 경로 표시 & API 전송
+  // --- [3] 지도 클릭 시 마커 & 경로 ---
   const handleMapClick = async (location) => {
+    // 마커 추가 (label != 'A')
     setMarkers((prev) => [
       ...prev,
       {
         position: location,
-        label: String.fromCharCode(65 + prev.length),
+        label: String.fromCharCode(65 + prev.length), // B, C, D...
         title: "클릭한 위치",
         description: "사용자가 클릭한 위치입니다.",
       },
     ]);
 
+    // 목적지 기록
+    setLastDestination(location);
+
+    // 경로 계산
     calculateRoute(location);
 
-    // API 요청
+    // API 전송
     const startPoint = {
       startY: currentLocation.lng,
       startX: currentLocation.lat,
@@ -166,14 +178,15 @@ function Main() {
     }
   };
 
-  // 경로 계산 함수
+  // --- [4] 경로 계산 함수 (이동 모드 travelMode 사용) ---
   const calculateRoute = (destination) => {
+    if (!destination) return;
     const directionsService = new window.google.maps.DirectionsService();
     directionsService.route(
       {
         origin: currentLocation,
         destination,
-        travelMode: window.google.maps.TravelMode.WALKING,
+        travelMode: travelMode, // 상태에 저장된 이동 모드 사용
       },
       (result, status) => {
         if (status === window.google.maps.DirectionsStatus.OK) {
@@ -185,25 +198,20 @@ function Main() {
     );
   };
 
-  /* ===============================
-      Autocomplete 초기화 & 이벤트
-  ================================ */
+  // --- [5] Autocomplete 초기화 & 이벤트 ---
   useEffect(() => {
-    if (isModalOpen && window.google) {
-      // Autocomplete 객체 생성
+    if (isModalOpen && autocompleteInputRef.current) {
       const autocomplete = new window.google.maps.places.Autocomplete(
         autocompleteInputRef.current,
-        {
-          // 옵션: types 등 지정 가능
-        }
+        {}
       );
       autocompleteObjRef.current = autocomplete;
 
-      // place_changed 이벤트
+      // 자동완성 리스트 항목 클릭 시
       autocomplete.addListener("place_changed", handlePlaceChanged);
     }
 
-    // 모달 닫힐 때마다 리스너 정리
+    // 모달 닫힐 때 리스너 해제
     return () => {
       if (autocompleteObjRef.current) {
         window.google.maps.event.clearInstanceListeners(
@@ -213,30 +221,33 @@ function Main() {
     };
   }, [isModalOpen]);
 
-  // 장소 선택 시
+  // 자동완성 place_changed
   const handlePlaceChanged = async () => {
     const place = autocompleteObjRef.current?.getPlace();
     if (!place || !place.geometry) {
-      console.log("장소를 찾을 수 없습니다.");
+      alert("장소를 찾을 수 없습니다. (자동완성 선택)");
       return;
     }
-
     const lat = place.geometry.location.lat();
     const lng = place.geometry.location.lng();
 
     // 마커 추가
+    const newLocation = { lat, lng };
     setMarkers((prev) => [
       ...prev,
       {
-        position: { lat, lng },
+        position: newLocation,
         label: String.fromCharCode(65 + prev.length),
         title: "검색된 위치",
         description: place.formatted_address || searchValue,
       },
     ]);
 
+    // 목적지 기록
+    setLastDestination(newLocation);
+
     // 경로 계산
-    calculateRoute({ lat, lng });
+    calculateRoute(newLocation);
 
     // API 전송
     const startPoint = {
@@ -250,11 +261,7 @@ function Main() {
 
     try {
       const response = await sendStartPoint(startPoint);
-      console.log(
-        "시작점 정보 전송 성공(자동완성):",
-        response.credit,
-        response.distance
-      );
+      console.log("시작점 정보 전송 성공(자동완성):", response.credit, response.distance);
 
       setCredits(response.credit);
       setDistance(response.distance);
@@ -269,15 +276,199 @@ function Main() {
     closeModal();
   };
 
-  /* =========================
-      모달 열기/닫기
-  ========================== */
+  // --- [6] 수동 검색 (ENTER or 검색 버튼) ---
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSearch();
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchValue.trim()) {
+      alert("검색어를 입력하세요.");
+      return;
+    }
+
+    // 1) Autocomplete에서 place가 확정된 상태인지
+    const place = autocompleteObjRef.current?.getPlace();
+    if (place && place.geometry) {
+      handlePlaceByGeometry(place);
+    } else {
+      // 2) Geocoding API 수동 검색
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ address: searchValue }, async (results, status) => {
+        if (status === "OK" && results[0]) {
+          const loc = results[0].geometry.location;
+          const lat = loc.lat();
+          const lng = loc.lng();
+          const newLocation = { lat, lng };
+
+          // 마커 추가
+          setMarkers((prev) => [
+            ...prev,
+            {
+              position: newLocation,
+              label: String.fromCharCode(65 + prev.length),
+              title: "검색된 위치",
+              description: results[0].formatted_address || searchValue,
+            },
+          ]);
+
+          // 목적지 기록
+          setLastDestination(newLocation);
+
+          // 경로 계산
+          calculateRoute(newLocation);
+
+          // API 전송
+          const startPoint = {
+            startY: currentLocation.lng,
+            startX: currentLocation.lat,
+            endY: lng,
+            endX: lat,
+            currentY: currentLocation.lng,
+            currentX: currentLocation.lat,
+          };
+
+          try {
+            const response = await sendStartPoint(startPoint);
+            console.log("시작점 정보 전송 성공(수동검색):", response.credit, response.distance);
+
+            setCredits(response.credit);
+            setDistance(response.distance);
+            setResultModalOpen(true);
+          } catch (err) {
+            console.error("검색 위치 전송 실패:", err);
+          }
+          closeModal();
+        } else {
+          alert("장소를 찾을 수 없습니다. (수동검색)");
+        }
+      });
+    }
+  };
+
+  // 중복 로직 분리
+  const handlePlaceByGeometry = async (place) => {
+    const lat = place.geometry.location.lat();
+    const lng = place.geometry.location.lng();
+    const newLocation = { lat, lng };
+
+    // 마커 추가
+    setMarkers((prev) => [
+      ...prev,
+      {
+        position: newLocation,
+        label: String.fromCharCode(65 + prev.length),
+        title: "검색된 위치",
+        description: place.formatted_address || searchValue,
+      },
+    ]);
+
+    // 목적지 기록
+    setLastDestination(newLocation);
+
+    // 경로 계산
+    calculateRoute(newLocation);
+
+    // API 전송
+    const startPoint = {
+      startY: currentLocation.lng,
+      startX: currentLocation.lat,
+      endY: lng,
+      endX: lat,
+      currentY: currentLocation.lng,
+      currentX: currentLocation.lat,
+    };
+
+    try {
+      const response = await sendStartPoint(startPoint);
+      console.log(
+        "시작점 정보 전송 성공(Autocomplete + Enter):",
+        response.credit,
+        response.distance
+      );
+
+      setCredits(response.credit);
+      setDistance(response.distance);
+      setResultModalOpen(true);
+    } catch (error) {
+      console.error("검색 위치 전송 실패:", error);
+    }
+
+    closeModal();
+  };
+
+  // --- [7] 모달 열기/닫기 ---
+  // (1) 검색 모달 열기
   const openModal = () => {
     setIsModalOpen(true);
     setSearchValue("");
   };
-  const closeModal = () => setIsModalOpen(false);
-  const closeResultModal = () => setResultModalOpen(false);
+
+  // (2) 검색 모달 닫기 -> "현재 위치(A) 마커 제외" 나머지 마커 제거
+  const closeModal = () => {
+    // 현재 위치(A) 마커만 남기고 나머지 마커 제거
+    setMarkers((prev) => prev.filter((m) => m.label === "A"));
+    setIsModalOpen(false);
+  };
+
+  // (3) 결과 모달 닫기 -> "현재 위치(A) 마커 제외" 나머지 마커 제거
+  const closeResultModal = () => {
+    // 현재 위치(A) 마커만 남기고 나머지 마커 제거
+    setMarkers((prev) => prev.filter((m) => m.label === "A"));
+    setResultModalOpen(false);
+  };
+
+  // 언마운트 시 interval 정리
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  // (9) 결과 모달: "이동하기" 버튼 -> DRIVING 모드 + 10초마다 위치 PATCH
+  const handleStartMoving = () => {
+    // 이동 모드를 DRIVING으로 설정
+    setTravelMode(window.google.maps.TravelMode.DRIVING);
+
+    // lastDestination이 있다면, DRIVING 모드로 경로 다시 계산
+    if (lastDestination) {
+      calculateRoute(lastDestination);
+    }
+
+    // 10초마다 현재 위치 전송 (sendWalking)
+    // 기존 interval이 있다면 중복 방지를 위해 clear
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    // 새로운 interval 생성
+    intervalRef.current = setInterval(() => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            // PATCH 요청
+            const curX = pos.coords.latitude;
+            const curY = pos.coords.longitude;
+
+            sendWalking(curX, curY)
+              .then((res) => {
+                console.log("도보 중 위치 전송 성공:", res);
+              })
+              .catch((err) => {
+                console.error("도보 중 위치 전송 실패:", err);
+              });
+          },
+          (err) => {
+            console.error("Geolocation 에러:", err);
+          }
+        );
+      }
+    }, 10000);
+
+    // 모달 닫기
+    closeResultModal();
+  };
 
   return (
     <Wrapper
@@ -311,7 +502,7 @@ function Main() {
           목적지 검색
         </button>
 
-        {/* 검색 모달 (Autocomplete) */}
+        {/* 검색 모달 (Autocomplete + 수동 검색) */}
         <Modal
           isOpen={isModalOpen}
           onRequestClose={closeModal}
@@ -337,8 +528,13 @@ function Main() {
             className="w-full p-2 border rounded mb-4"
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
+            onKeyDown={handleKeyDown} // ENTER 키 핸들링
           />
+
           <div className="flex justify-end gap-2">
+            {/* 
+              [취소] 누르면 현재 위치 마커만 남기고 검색/클릭 마커 제거
+            */}
             <button
               onClick={closeModal}
               className="bg-gray-300 text-black px-4 py-2 rounded"
@@ -346,14 +542,18 @@ function Main() {
               취소
             </button>
             {/* 
-              이 버튼은 '직접 검색(Geocoding)'을 추가로 지원하려면 사용 가능.
-              현재는 자동완성 선택 시 바로 place_changed 이벤트가 발생하므로
-              별도로 [검색] 버튼이 필요 없다면 비워두거나 숨길 수 있습니다.
+              [검색] 버튼
             */}
+            <button
+              onClick={handleSearch}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+              검색
+            </button>
           </div>
         </Modal>
 
-        {/* 결과 모달 (경로 정보) */}
+        {/* 결과 모달 */}
         <Modal
           isOpen={resultModalOpen}
           onRequestClose={closeResultModal}
@@ -362,24 +562,55 @@ function Main() {
               backgroundColor: "rgba(0, 0, 0, 0.5)",
             },
             content: {
-              width: "300px",
+              width: "320px",
               height: "200px",
               margin: "auto",
               padding: "20px",
-              borderRadius: "10px",
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              borderRadius: "12px",
+              boxShadow:
+                "0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05)",
             },
           }}
         >
-          <h2 className="text-lg font-semibold mb-4">경로 정보</h2>
-          <p>크레딧: {credits}</p>
-          <p>거리: {distance} m</p>
-          <button
-            onClick={closeResultModal}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg mt-4"
-          >
-            닫기
-          </button>
+          <div className="p-4">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">
+              🚶 경로 정보
+            </h2>
+
+            <div className="mb-4">
+              <p className="text-gray-700">
+                <span className="font-semibold text-gray-900">예상 크레딧:</span>{" "}
+                {credits}
+              </p>
+              <p className="text-gray-700">
+                <span className="font-semibold text-gray-900">
+                  목적지까지의 거리:
+                </span>{" "}
+                {distance.toFixed(2)} m
+              </p>
+            </div>
+
+            <div className="flex justify-between gap-2 mt-4">
+              {/* 
+                [이동하기] 버튼 -> DRIVING 모드로 전환 후 경로 재계산
+                + 10초마다 현재 위치 patch
+              */}
+              <button
+                onClick={handleStartMoving}
+                className="w-1/2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-all"
+              >
+                이동하기
+              </button>
+
+              {/* 닫기 버튼 */}
+              <button
+                onClick={closeResultModal}
+                className="w-1/2 bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-lg transition-all"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
         </Modal>
       </div>
     </Wrapper>

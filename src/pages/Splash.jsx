@@ -5,18 +5,26 @@ function Splash() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 컴포넌트가 마운트된 뒤 2초 후에 /main으로 이동
+    // 2초 후 메인 페이지로 이동
     const timer = setTimeout(() => {
       navigate('/main');
     }, 2000);
 
-    // 컴포넌트가 언마운트될 때 타이머 정리
-    return () => clearTimeout(timer);
+    return () => clearTimeout(timer); // 타이머 정리
   }, [navigate]);
 
   return (
-    <div className="h-screen flex items-center justify-center bg-white">
-      <h1 className="text-4xl font-bold text-gray-800">Triple C</h1>
+    <div className="h-screen flex flex-col items-center justify-center bg-white">
+      {/* 로고 이미지 */}
+      <img
+        src="/logo.png"
+        alt="Loading"
+        className="w-200 h-200 animate-wiggle" // 애니메이션 클래스 적용
+      />
+      {/* 텍스트 */}
+      <h1 className="text-1xl font-bold text-gray-800 mt-4">
+        Made By Step by Step
+      </h1>
     </div>
   );
 }
