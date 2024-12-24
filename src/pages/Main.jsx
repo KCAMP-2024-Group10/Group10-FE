@@ -73,10 +73,9 @@ const Map = ({ center, zoom, markers, onMapClick, directions }) => {
 // 모달 설정
 Modal.setAppElement("#root");
 
-// 메인 컴포넌트
 function Main() {
   // --- [1] 상태 변수들 ---
-  const [isModalOpen, setIsModalOpen] = useState(false); // 목적지 검색 모달
+  const [isModalOpen, setIsModalOpen] = useState(false);   // 목적지 검색 모달
   const [resultModalOpen, setResultModalOpen] = useState(false); // 결과 모달
 
   const [currentLocation, setCurrentLocation] = useState(initialPosition);
@@ -94,16 +93,31 @@ function Main() {
   const [credits, setCredits] = useState(0);
   const [distance, setDistance] = useState(0);
 
-  // 마지막 목적지 (DRIVING 모드일 때, 끝나는 위치 등)
+  // 마지막 목적지 (DRIVING 모드일 때)
   const [lastDestination, setLastDestination] = useState(null);
 
-  // 이동 모드: WALKING → DRIVING
+  // 이동 모드: 기본 WALKING → DRIVING
   const [travelMode, setTravelMode] = useState(
     window.google.maps.TravelMode.WALKING
   );
 
   // 위치 전송 Interval
   const intervalRef = useRef(null);
+
+  // **추가**: alert 대체용 모달 상태
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertMessage, setAlertMessage] = useState("");
+
+  // --- [alert 모달 열기/닫기 함수] ---
+  const openAlertModal = (msg) => {
+    setAlertMessage(msg);
+    setAlertOpen(true);
+  };
+
+  const closeAlertModal = () => {
+    setAlertMessage("");
+    setAlertOpen(false);
+  };
 
   // --- [2] 현재 위치 가져오기 ---
   useEffect(() => {
@@ -118,7 +132,7 @@ function Main() {
           setMarkers([
             {
               position: userLocation,
-              label: "A", // 현재 위치
+              label: "A",
               title: "현재 위치",
               description: "사용자의 현재 위치입니다.",
             },
@@ -131,7 +145,8 @@ function Main() {
         }
       );
     } else {
-      console.error("Geolocation이 브라우저에서 지원되지 않습니다.");
+      // alert("Geolocation이 지원되지 않습니다.");
+      openAlertModal("Geolocation is not supported by this browser.");
       setLoading(false);
     }
   }, []);
@@ -142,19 +157,16 @@ function Main() {
       ...prev,
       {
         position: location,
-        label: String.fromCharCode(65 + prev.length), // B, C, D...
+        label: String.fromCharCode(65 + prev.length), // B, C, D ...
         title: "클릭한 위치",
         description: "사용자가 클릭한 위치입니다.",
       },
     ]);
 
-    // 목적지
     setLastDestination(location);
-
-    // 경로 계산
     calculateRoute(location);
 
-    // API (시작점 전송)
+    // 시작점 전송
     const startPoint = {
       startY: currentLocation.lng,
       startX: currentLocation.lat,
@@ -171,10 +183,10 @@ function Main() {
       setCredits(response.credit);
       setDistance(response.distance);
 
-      // 결과 모달
       setResultModalOpen(true);
     } catch (error) {
       console.error("시작점 전송 실패:", error);
+      openAlertModal("Failed to send start point.");
     }
   };
 
@@ -193,6 +205,7 @@ function Main() {
           setDirections(result);
         } else {
           console.error("경로 계산 실패:", status);
+          openAlertModal("Failed to calculate route.");
         }
       }
     );
@@ -221,7 +234,8 @@ function Main() {
   const handlePlaceChanged = async () => {
     const place = autocompleteObjRef.current?.getPlace();
     if (!place || !place.geometry) {
-      alert("장소를 찾을 수 없습니다.");
+      // alert("장소를 찾을 수 없습니다.");
+      openAlertModal("Cannot find this place.");
       return;
     }
 
@@ -243,7 +257,7 @@ function Main() {
     setLastDestination(newLocation);
     calculateRoute(newLocation);
 
-    // API
+    // 시작점 전송
     const startPoint = {
       startY: currentLocation.lng,
       startX: currentLocation.lat,
@@ -267,6 +281,7 @@ function Main() {
       setResultModalOpen(true);
     } catch (error) {
       console.error("검색 위치 전송 실패:", error);
+      openAlertModal("Failed to send start point (Autocomplete).");
     }
 
     closeModal();
@@ -282,7 +297,7 @@ function Main() {
 
   const handleSearch = async () => {
     if (!searchValue.trim()) {
-      alert("검색어를 입력하세요.");
+      openAlertModal("Please enter a search term.");
       return;
     }
 
@@ -314,7 +329,7 @@ function Main() {
           setLastDestination(newLocation);
           calculateRoute(newLocation);
 
-          // API
+          // 시작점 전송
           const startPoint = {
             startY: currentLocation.lng,
             startX: currentLocation.lat,
@@ -337,10 +352,12 @@ function Main() {
             setResultModalOpen(true);
           } catch (err) {
             console.error("검색 위치 전송 실패:", err);
+            openAlertModal("Failed to send start point (Manual search).");
           }
           closeModal();
         } else {
-          alert("장소를 찾을 수 없습니다.");
+          // alert("장소를 찾을 수 없습니다.");
+          openAlertModal("Cannot find this place (Manual search).");
         }
       });
     }
@@ -382,6 +399,7 @@ function Main() {
       setResultModalOpen(true);
     } catch (error) {
       console.error("검색 위치 전송 실패:", error);
+      openAlertModal("Failed to send start point (Geometry).");
     }
 
     closeModal();
@@ -412,42 +430,52 @@ function Main() {
     };
   }, []);
 
-  // --- [9] 이동하기: DRIVING + 10초마다 위치 전송 ---
-  const handleStartMoving = () => {
-    setTravelMode(window.google.maps.TravelMode.DRIVING);
+// --- [9] 이동하기: DRIVING + 10초마다 위치 전송 ---
+const handleStartMoving = () => {
+  setTravelMode(window.google.maps.TravelMode.DRIVING);
 
-    if (lastDestination) {
-      calculateRoute(lastDestination);
+  if (lastDestination) {
+    calculateRoute(lastDestination);
+  }
+
+  // 기존 interval 정리
+  if (intervalRef.current) clearInterval(intervalRef.current);
+
+  // 새 interval
+  intervalRef.current = setInterval(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const curX = pos.coords.latitude;
+          const curY = pos.coords.longitude;
+
+          sendWalking(curX, curY)
+            .then((res) => {
+              console.log("도보 중 위치 전송 성공:", res);
+              // [추가] moving API 호출 성공 시 사용자 정의 모달 띄우기
+              
+              if (res && res.length > 0) {
+                const name = res[0].name;
+                console.log(name);
+                openAlertModal(`${name} Coupon Issued!`);
+                //alert(`${name} 쿠폰 발급!`); // 알림 표시
+              } 
+            })
+            .catch((err) => {
+              console.error("도보 중 위치 전송 실패:", err);
+              openAlertModal("Failed to send walking data!");
+            });
+        },
+        (err) => {
+          console.error("Geolocation 에러:", err);
+          openAlertModal("Failed to get geolocation while moving!");
+        }
+      );
     }
+  }, 5000);
 
-    // 기존 interval 정리
-    if (intervalRef.current) clearInterval(intervalRef.current);
-
-    // 새 interval
-    intervalRef.current = setInterval(() => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const curX = pos.coords.latitude;
-            const curY = pos.coords.longitude;
-
-            sendWalking(curX, curY)
-              .then((res) => {
-                console.log("도보 중 위치 전송 성공:", res);
-              })
-              .catch((err) => {
-                console.error("도보 중 위치 전송 실패:", err);
-              });
-          },
-          (err) => {
-            console.error("Geolocation 에러:", err);
-          }
-        );
-      }
-    }, 10000);
-
-    closeResultModal();
-  };
+  closeResultModal();
+};
 
   // --- [10] 이동 완료 (도착지 POST) ---
   const handleEndMoving = async () => {
@@ -455,7 +483,8 @@ function Main() {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     if (!lastDestination) {
-      alert("도착지가 지정되지 않았습니다.");
+      // alert("도착지가 지정되지 않았습니다.");
+      openAlertModal("Destination not set!");
       return;
     }
 
@@ -466,17 +495,16 @@ function Main() {
     };
 
     try {
-      // 도착지 전송
       const res = await sendEndPoint(endData);
       console.log("도착지 전송 성공:", res);
 
       // 응답이 true/false라 가정
       if (res === true) {
-        alert("Congratulations! A reward has been added!");
+        // alert("도보 유저로 판단되어 리워드가 추가되었습니다!");
+        openAlertModal("Congratulations! A reward has been added!");
       } else {
-        alert(
-          "Rewards cannot be granted as you are using a motorcycle or car!"
-        );
+        // alert("오토바이 또는 자동차 유저로 판단되어 리워드가 지급되지 않았습니다.");
+        openAlertModal("Rewards cannot be granted as you are using a motorcycle or car!");
       }
 
       // 이동 모드 원복
@@ -488,9 +516,9 @@ function Main() {
       // 목적지 상태 초기화
       setLastDestination(null);
 
-      // 추가적인 후속 처리(ex: 페이지 이동, 상태 갱신 등) 필요시 여기에 작성
     } catch (err) {
       console.error("도착지 전송 실패:", err);
+      openAlertModal("Failed to send end point!");
     }
   };
 
@@ -506,7 +534,6 @@ function Main() {
             <div className="flex flex-col items-center">
               {/* 로딩 애니메이션 */}
               <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-blue-500 border-opacity-75"></div>
-              {/* 로딩 텍스트 */}
               <p className="mt-4 text-gray-600 font-medium">
                 Loading current location...
               </p>
@@ -644,6 +671,37 @@ function Main() {
                 close
               </button>
             </div>
+          </div>
+        </Modal>
+
+        {/* =========================
+            사용자 정의 alert 모달
+        ========================== */}
+        <Modal
+          isOpen={alertOpen}
+          onRequestClose={closeAlertModal}
+          style={{
+            overlay: {
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+            },
+            content: {
+              width: "300px",
+              height: "150px",
+              margin: "auto",
+              padding: "20px",
+              borderRadius: "10px",
+              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            },
+          }}
+        >
+          <div className="flex flex-col items-center justify-center h-full">
+            <p className="text-center text-gray-800 mb-4">{alertMessage}</p>
+            <button
+              onClick={closeAlertModal}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+              OK
+            </button>
           </div>
         </Modal>
       </div>

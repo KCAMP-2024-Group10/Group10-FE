@@ -8,7 +8,7 @@ function Splash() {
     // 2초 후 메인 페이지로 이동
     const timer = setTimeout(() => {
       navigate('/main');
-    }, 2000);
+    }, 10000);
 
     return () => clearTimeout(timer); // 타이머 정리
   }, [navigate]);
